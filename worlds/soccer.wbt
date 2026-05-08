@@ -156,25 +156,56 @@ DEF LINE_CTR Solid {
   locked TRUE
 }
 
-# Centre circle – 16 thin white box segments placed around r = 0.35 m
-# Each segment is a chord: length = 2*0.35*sin(π/16) ≈ 0.137 m, width 0.022 m
-# Rotation around Y-axis aligns the box tangent to the circle at each mid-angle.
-DEF CC0  Solid { translation  0.3433 0.002  0.0683 rotation 0 1 0 1.7671 name "cc0"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC1  Solid { translation  0.2910 0.002  0.1945 rotation 0 1 0 2.1598 name "cc1"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC2  Solid { translation  0.1945 0.002  0.2910 rotation 0 1 0 2.5525 name "cc2"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC3  Solid { translation  0.0683 0.002  0.3433 rotation 0 1 0 2.9452 name "cc3"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC4  Solid { translation -0.0683 0.002  0.3433 rotation 0 1 0 3.3379 name "cc4"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC5  Solid { translation -0.1945 0.002  0.2910 rotation 0 1 0 3.7306 name "cc5"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC6  Solid { translation -0.2910 0.002  0.1945 rotation 0 1 0 4.1233 name "cc6"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC7  Solid { translation -0.3433 0.002  0.0683 rotation 0 1 0 4.5160 name "cc7"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC8  Solid { translation -0.3433 0.002 -0.0683 rotation 0 1 0 4.9087 name "cc8"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC9  Solid { translation -0.2910 0.002 -0.1945 rotation 0 1 0 5.3014 name "cc9"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC10 Solid { translation -0.1945 0.002 -0.2910 rotation 0 1 0 5.6941 name "cc10" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC11 Solid { translation -0.0683 0.002 -0.3433 rotation 0 1 0 6.0868 name "cc11" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC12 Solid { translation  0.0683 0.002 -0.3433 rotation 0 1 0 0.1963 name "cc12" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC13 Solid { translation  0.1945 0.002 -0.2910 rotation 0 1 0 0.5890 name "cc13" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC14 Solid { translation  0.2910 0.002 -0.1945 rotation 0 1 0 0.9817 name "cc14" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
-DEF CC15 Solid { translation  0.3433 0.002 -0.0683 rotation 0 1 0 1.3744 name "cc15" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+# Centre circle – flat ring drawn as an IndexedFaceSet (32 quad faces).
+# Inner radius 0.339 m, outer radius 0.361 m → 22 mm line width matching all
+# other field lines.  Points lie in the local XZ plane (Y=0); the Solid's
+# translation lifts the ring 2 mm above the floor to prevent z-fighting.
+DEF CENTRE_CIRCLE Solid {
+  translation 0 0.002 0
+  name "centre_circle"
+  children [
+    Shape {
+      appearance USE LINE_APP
+      geometry IndexedFaceSet {
+        coord Coordinate {
+          point [
+            # Inner ring  r = 0.339 m  (indices 0 – 31)
+             0.3390 0  0.0000   0.3325 0  0.0661   0.3132 0  0.1297   0.2819 0  0.1883
+             0.2397 0  0.2397   0.1883 0  0.2819   0.1297 0  0.3132   0.0661 0  0.3325
+             0.0000 0  0.3390  -0.0661 0  0.3325  -0.1297 0  0.3132  -0.1883 0  0.2819
+            -0.2397 0  0.2397  -0.2819 0  0.1883  -0.3132 0  0.1297  -0.3325 0  0.0661
+            -0.3390 0  0.0000  -0.3325 0 -0.0661  -0.3132 0 -0.1297  -0.2819 0 -0.1883
+            -0.2397 0 -0.2397  -0.1883 0 -0.2819  -0.1297 0 -0.3132  -0.0661 0 -0.3325
+             0.0000 0 -0.3390   0.0661 0 -0.3325   0.1297 0 -0.3132   0.1883 0 -0.2819
+             0.2397 0 -0.2397   0.2819 0 -0.1883   0.3132 0 -0.1297   0.3325 0 -0.0661
+            # Outer ring  r = 0.361 m  (indices 32 – 63)
+             0.3610 0  0.0000   0.3541 0  0.0704   0.3335 0  0.1382   0.3002 0  0.2006
+             0.2553 0  0.2553   0.2006 0  0.3002   0.1382 0  0.3335   0.0704 0  0.3541
+             0.0000 0  0.3610  -0.0704 0  0.3541  -0.1382 0  0.3335  -0.2006 0  0.3002
+            -0.2553 0  0.2553  -0.3002 0  0.2006  -0.3335 0  0.1382  -0.3541 0  0.0704
+            -0.3610 0  0.0000  -0.3541 0 -0.0704  -0.3335 0 -0.1382  -0.3002 0 -0.2006
+            -0.2553 0 -0.2553  -0.2006 0 -0.3002  -0.1382 0 -0.3335  -0.0704 0 -0.3541
+             0.0000 0 -0.3610   0.0704 0 -0.3541   0.1382 0 -0.3335   0.2006 0 -0.3002
+             0.2553 0 -0.2553   0.3002 0 -0.2006   0.3335 0 -0.1382   0.3541 0 -0.0704
+          ]
+        }
+        coordIndex [
+           0  1 33 32 -1   1  2 34 33 -1   2  3 35 34 -1   3  4 36 35 -1
+           4  5 37 36 -1   5  6 38 37 -1   6  7 39 38 -1   7  8 40 39 -1
+           8  9 41 40 -1   9 10 42 41 -1  10 11 43 42 -1  11 12 44 43 -1
+          12 13 45 44 -1  13 14 46 45 -1  14 15 47 46 -1  15 16 48 47 -1
+          16 17 49 48 -1  17 18 50 49 -1  18 19 51 50 -1  19 20 52 51 -1
+          20 21 53 52 -1  21 22 54 53 -1  22 23 55 54 -1  23 24 56 55 -1
+          24 25 57 56 -1  25 26 58 57 -1  26 27 59 58 -1  27 28 60 59 -1
+          28 29 61 60 -1  29 30 62 61 -1  30 31 63 62 -1  31  0 32 63 -1
+        ]
+        solid FALSE
+        creaseAngle 0
+      }
+    }
+  ]
+  locked TRUE
+}
 
 # Centre spot
 DEF CTR_SPOT Solid {
