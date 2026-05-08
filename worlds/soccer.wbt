@@ -1,0 +1,450 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/gctronic/e-puck/protos/E-puck.proto"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  WORLD INFO
+#  Field:  3.0 m (X, long)  ×  2.0 m (Z, short)   Y = up
+#  Left goal mouth at x = -1.5 m   |   Right goal mouth at x = +1.5 m
+#  Goal: 0.70 m wide (Z) × 0.40 m tall (Y) × 0.25 m deep (X)
+# ─────────────────────────────────────────────────────────────────────────────
+WorldInfo {
+  title "Simplified Robot Soccer - 1v1"
+  basicTimeStep 64
+  contactProperties [
+    ContactProperties {
+      material1 "ball"
+      coulombFriction [ 0.5 ]
+      bounce 0.5
+      bounceVelocity 0.01
+    }
+    ContactProperties {
+      material1 "ball"
+      material2 "robot"
+      coulombFriction [ 0.3 ]
+      bounce 0.3
+      bounceVelocity 0.01
+    }
+  ]
+}
+
+Viewpoint {
+  fieldOfView 1.0
+  orientation -1 0 0 1.5707963
+  position 0 4.5 0
+}
+
+Background {
+  skyColor [
+    0.15 0.15 0.18
+  ]
+}
+# Overhead key light
+DirectionalLight {
+  direction 0 -1 0
+  intensity 0.8
+}
+# Front-left fill
+DirectionalLight {
+  direction -0.4 -0.7 -0.6
+  intensity 0.5
+}
+# Back-right fill (removes dark patches on far side of field)
+DirectionalLight {
+  direction 0.4 -0.7 0.6
+  intensity 0.4
+}
+# Camera-direction fill (ensures near sideline is always lit)
+DirectionalLight {
+  direction 0 -0.5 -1
+  intensity 0.3
+}
+
+# ── FIELD FLOOR  (top surface at y = 0) ─────────────────────────────────────
+DEF FIELD_FLOOR Solid {
+  translation 0 -0.02 0
+  name "field_floor"
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.13 0.55 0.13
+        roughness 0.95
+        metalness 0
+      }
+      geometry Box {
+        size 4.2 0.04 3.2
+      }
+    }
+  ]
+  contactMaterial "floor"
+  boundingObject Box {
+    size 4.2 0.04 3.2
+  }
+  locked TRUE
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FIELD LINES  (purely visual – no boundingObject)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Top sideline  z = +1.0
+DEF LINE_TOP Solid {
+  translation 0 0.001 1.0
+  name "line_top"
+  children [
+    Shape {
+      appearance DEF LINE_APP PBRAppearance {
+        baseColor 1 1 1
+        roughness 0.5
+        metalness 0
+      }
+      geometry Box { size 3.04 0.002 0.022 }
+    }
+  ]
+  locked TRUE
+}
+
+# Bottom sideline  z = -1.0
+DEF LINE_BOT Solid {
+  translation 0 0.001 -1.0
+  name "line_bot"
+  children [
+    Shape {
+      appearance USE LINE_APP
+      geometry Box { size 3.04 0.002 0.022 }
+    }
+  ]
+  locked TRUE
+}
+
+# Left end-line  x = -1.5
+DEF LINE_LEFT Solid {
+  translation -1.5 0.001 0
+  name "line_left"
+  children [
+    Shape {
+      appearance USE LINE_APP
+      geometry Box { size 0.022 0.002 2.044 }
+    }
+  ]
+  locked TRUE
+}
+
+# Right end-line  x = +1.5
+DEF LINE_RIGHT Solid {
+  translation 1.5 0.001 0
+  name "line_right"
+  children [
+    Shape {
+      appearance USE LINE_APP
+      geometry Box { size 0.022 0.002 2.044 }
+    }
+  ]
+  locked TRUE
+}
+
+# Centre line  x = 0
+DEF LINE_CTR Solid {
+  translation 0 0.001 0
+  name "line_ctr"
+  children [
+    Shape {
+      appearance USE LINE_APP
+      geometry Box { size 0.022 0.002 2.0 }
+    }
+  ]
+  locked TRUE
+}
+
+# Centre circle – 16 thin white box segments placed around r = 0.35 m
+# Each segment is a chord: length = 2*0.35*sin(π/16) ≈ 0.137 m, width 0.022 m
+# Rotation around Y-axis aligns the box tangent to the circle at each mid-angle.
+DEF CC0  Solid { translation  0.3433 0.002  0.0683 rotation 0 1 0 1.7671 name "cc0"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC1  Solid { translation  0.2910 0.002  0.1945 rotation 0 1 0 2.1598 name "cc1"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC2  Solid { translation  0.1945 0.002  0.2910 rotation 0 1 0 2.5525 name "cc2"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC3  Solid { translation  0.0683 0.002  0.3433 rotation 0 1 0 2.9452 name "cc3"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC4  Solid { translation -0.0683 0.002  0.3433 rotation 0 1 0 3.3379 name "cc4"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC5  Solid { translation -0.1945 0.002  0.2910 rotation 0 1 0 3.7306 name "cc5"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC6  Solid { translation -0.2910 0.002  0.1945 rotation 0 1 0 4.1233 name "cc6"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC7  Solid { translation -0.3433 0.002  0.0683 rotation 0 1 0 4.5160 name "cc7"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC8  Solid { translation -0.3433 0.002 -0.0683 rotation 0 1 0 4.9087 name "cc8"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC9  Solid { translation -0.2910 0.002 -0.1945 rotation 0 1 0 5.3014 name "cc9"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC10 Solid { translation -0.1945 0.002 -0.2910 rotation 0 1 0 5.6941 name "cc10" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC11 Solid { translation -0.0683 0.002 -0.3433 rotation 0 1 0 6.0868 name "cc11" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC12 Solid { translation  0.0683 0.002 -0.3433 rotation 0 1 0 0.1963 name "cc12" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC13 Solid { translation  0.1945 0.002 -0.2910 rotation 0 1 0 0.5890 name "cc13" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC14 Solid { translation  0.2910 0.002 -0.1945 rotation 0 1 0 0.9817 name "cc14" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+DEF CC15 Solid { translation  0.3433 0.002 -0.0683 rotation 0 1 0 1.3744 name "cc15" children [ Shape { appearance USE LINE_APP geometry Box { size 0.137 0.003 0.022 } } ] locked TRUE }
+
+# Centre spot
+DEF CTR_SPOT Solid {
+  translation 0 0.002 0
+  name "ctr_spot"
+  children [
+    Shape {
+      appearance USE LINE_APP
+      geometry Cylinder {
+        height 0.003
+        radius 0.035
+      }
+    }
+  ]
+  locked TRUE
+}
+
+# ── Penalty boxes ────────────────────────────────────────────────────────────
+# Left penalty area: x ∈ [-1.5, -1.1],  z ∈ [-0.5, +0.5]
+DEF GA_L_TOP  Solid { translation -1.30 0.001  0.50 name "ga_l_top"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.40 0.002 0.022 } } ] locked TRUE }
+DEF GA_L_BOT  Solid { translation -1.30 0.001 -0.50 name "ga_l_bot"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.40 0.002 0.022 } } ] locked TRUE }
+DEF GA_L_SIDE Solid { translation -1.10 0.001  0.00 name "ga_l_side" children [ Shape { appearance USE LINE_APP geometry Box { size 0.022 0.002 1.00  } } ] locked TRUE }
+# Right penalty area: x ∈ [+1.1, +1.5],  z ∈ [-0.5, +0.5]
+DEF GA_R_TOP  Solid { translation  1.30 0.001  0.50 name "ga_r_top"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.40 0.002 0.022 } } ] locked TRUE }
+DEF GA_R_BOT  Solid { translation  1.30 0.001 -0.50 name "ga_r_bot"  children [ Shape { appearance USE LINE_APP geometry Box { size 0.40 0.002 0.022 } } ] locked TRUE }
+DEF GA_R_SIDE Solid { translation  1.10 0.001  0.00 name "ga_r_side" children [ Shape { appearance USE LINE_APP geometry Box { size 0.022 0.002 1.00  } } ] locked TRUE }
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  LEFT GOAL  (mouth at x = -1.5, depth extends to x = -1.75)
+#  back wall at x = -1.75  |  posts at z = ±0.35
+# ─────────────────────────────────────────────────────────────────────────────
+DEF GOAL_L_BACK Solid {
+  translation -1.75 0.20 0
+  name "goal_l_back"
+  children [
+    Shape {
+      appearance DEF GOAL_APP PBRAppearance {
+        baseColor 1 1 1
+        roughness 0.3
+        metalness 0.15
+      }
+      geometry Box { size 0.05 0.40 0.70 }
+    }
+  ]
+  boundingObject Box { size 0.05 0.40 0.70 }
+  locked TRUE
+}
+DEF GOAL_L_POST_P Solid {
+  translation -1.625 0.20 0.35
+  name "goal_l_post_p"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.25 0.40 0.05 } } ]
+  boundingObject Box { size 0.25 0.40 0.05 }
+  locked TRUE
+}
+DEF GOAL_L_POST_N Solid {
+  translation -1.625 0.20 -0.35
+  name "goal_l_post_n"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.25 0.40 0.05 } } ]
+  boundingObject Box { size 0.25 0.40 0.05 }
+  locked TRUE
+}
+DEF GOAL_L_CROSS Solid {
+  translation -1.625 0.41 0
+  name "goal_l_cross"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.25 0.022 0.75 } } ]
+  boundingObject Box { size 0.25 0.022 0.75 }
+  locked TRUE
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  RIGHT GOAL  (mouth at x = +1.5, depth extends to x = +1.75)
+# ─────────────────────────────────────────────────────────────────────────────
+DEF GOAL_R_BACK Solid {
+  translation 1.75 0.20 0
+  name "goal_r_back"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.05 0.40 0.70 } } ]
+  boundingObject Box { size 0.05 0.40 0.70 }
+  locked TRUE
+}
+DEF GOAL_R_POST_P Solid {
+  translation 1.625 0.20 0.35
+  name "goal_r_post_p"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.25 0.40 0.05 } } ]
+  boundingObject Box { size 0.25 0.40 0.05 }
+  locked TRUE
+}
+DEF GOAL_R_POST_N Solid {
+  translation 1.625 0.20 -0.35
+  name "goal_r_post_n"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.25 0.40 0.05 } } ]
+  boundingObject Box { size 0.25 0.40 0.05 }
+  locked TRUE
+}
+DEF GOAL_R_CROSS Solid {
+  translation 1.625 0.41 0
+  name "goal_r_cross"
+  children [ Shape { appearance USE GOAL_APP geometry Box { size 0.25 0.022 0.75 } } ]
+  boundingObject Box { size 0.25 0.022 0.75 }
+  locked TRUE
+}
+
+# Solid dark-gray arena boards - 0.10m thick sidelines, 0.08m thick end sections
+DEF WALL_NEAR Solid {
+  translation 0 0.175 1.05
+  name "wall_near"
+  children [
+    Shape {
+      appearance DEF WALL_APP PBRAppearance {
+        baseColor 0.28 0.28 0.28
+        roughness 0.85
+        metalness 0.05
+      }
+      geometry Box {
+        size 3.28 0.35 0.1
+      }
+    }
+  ]
+  boundingObject Box {
+    size 3.28 0.35 0.1
+  }
+  locked TRUE
+}
+DEF WALL_FAR Solid {
+  translation 0 0.175 -1.05
+  name "wall_far"
+  children [
+    Shape {
+      appearance USE WALL_APP
+      geometry Box {
+        size 3.28 0.35 0.1
+      }
+    }
+  ]
+  boundingObject Box {
+    size 3.28 0.35 0.1
+  }
+  locked TRUE
+}
+# End-wall corner sections start at z=+/-0.39 (just outside goal-post outer
+# edge at z=+/-0.375) so their bounding objects never overlap the goal posts.
+# Gap = 0.015 m < ball radius (0.043 m), so the ball cannot escape.
+DEF ENDW_L_TOP Solid {
+  translation -1.54 0.175 0.695
+  name "endw_l_top"
+  children [
+    Shape {
+      appearance USE WALL_APP
+      geometry Box {
+        size 0.08 0.35 0.61
+      }
+    }
+  ]
+  boundingObject Box {
+    size 0.08 0.35 0.61
+  }
+  locked TRUE
+}
+DEF ENDW_L_BOT Solid {
+  translation -1.54 0.175 -0.695
+  name "endw_l_bot"
+  children [
+    Shape {
+      appearance USE WALL_APP
+      geometry Box {
+        size 0.08 0.35 0.61
+      }
+    }
+  ]
+  boundingObject Box {
+    size 0.08 0.35 0.61
+  }
+  locked TRUE
+}
+DEF ENDW_R_TOP Solid {
+  translation 1.54 0.175 0.695
+  name "endw_r_top"
+  children [
+    Shape {
+      appearance USE WALL_APP
+      geometry Box {
+        size 0.08 0.35 0.61
+      }
+    }
+  ]
+  boundingObject Box {
+    size 0.08 0.35 0.61
+  }
+  locked TRUE
+}
+DEF ENDW_R_BOT Solid {
+  translation 1.54 0.175 -0.695
+  name "endw_r_bot"
+  children [
+    Shape {
+      appearance USE WALL_APP
+      geometry Box {
+        size 0.08 0.35 0.61
+      }
+    }
+  ]
+  boundingObject Box {
+    size 0.08 0.35 0.61
+  }
+  locked TRUE
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SOCCER BALL
+#  radius = 0.043 m (≈ size-1 ball scaled for E-puck arena)
+#  mass   = 40 g
+# ─────────────────────────────────────────────────────────────────────────────
+DEF BALL Solid {
+  translation 0 0.043 0
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 1 1 1
+        roughness 0.5
+        metalness 0
+      }
+      geometry Sphere {
+        radius 0.043
+        subdivision 2
+      }
+    }
+  ]
+  name "ball"
+  contactMaterial "ball"
+  boundingObject Sphere { radius 0.043 }
+  physics Physics {
+    density -1
+    mass 0.04
+  }
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ROBOTS
+#  Blue  starts in left half facing right  (+X)
+#  Red   starts in right half facing left  (-X)
+# ─────────────────────────────────────────────────────────────────────────────
+DEF ROBOT_BLUE E-puck {
+  translation -0.75 0 0
+  rotation 0 1 0 0
+  name "robot_blue"
+  controller "robot_controller"
+}
+
+DEF ROBOT_RED E-puck {
+  translation 0.75 0 0
+  rotation 0 1 0 3.14159265
+  name "robot_red"
+  controller "robot_controller"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SUPERVISOR  (invisible Robot used by the RL training loop)
+# ─────────────────────────────────────────────────────────────────────────────
+DEF SUPERVISOR Robot {
+  translation 0 0.5 0
+  name "supervisor"
+  controller "supervisor_controller"
+  supervisor TRUE
+  children [
+    Emitter {
+      name "emitter_blue"
+      channel -1
+    }
+    Emitter {
+      name "emitter_red"
+      channel -1
+    }
+  ]
+}
