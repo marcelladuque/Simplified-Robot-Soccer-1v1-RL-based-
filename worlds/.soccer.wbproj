@@ -8,5 +8,3 @@ centralWidgetVisible: 1
 orthographicViewHeight: 1
 textFiles: 0 "../../../../../../Program Files/Webots/projects/robots/clearpath/pr2/controllers/pr2_demo/pr2_demo.c"
 consoles: Console:All:All
-renderingDevicePerspectives: robot_blue:camera;0;1;0;0
-renderingDevicePerspectives: robot_red:camera;0;2.90385;0;0

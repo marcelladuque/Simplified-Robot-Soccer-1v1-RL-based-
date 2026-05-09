@@ -1,29 +1,35 @@
 #VRML_SIM R2025a utf8
 
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/gctronic/e-puck/protos/E-puck.proto"
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  WORLD INFO
 #  Field:  3.0 m (X, long)  ×  2.0 m (Z, short)   Y = up
 #  Left goal mouth at x = -1.5 m   |   Right goal mouth at x = +1.5 m
 #  Goal: 0.70 m wide (Z) × 0.40 m tall (Y) × 0.25 m deep (X)
+#
+#  Robots: Competition RoboCup F180 / SSL style
+#    TITAN  (ROBOT_BLUE) – ø180 mm × 64 mm, wheel r=32 mm,  5 rad/s, 1.50 kg – defensive
+#    VIPER  (ROBOT_RED)  – ø140 mm × 52 mm, wheel r=26 mm, 14 rad/s, 0.70 kg – offensive
+#  Ball: futsal-style orange sphere (ø86 mm, 40 g)
 # ─────────────────────────────────────────────────────────────────────────────
 WorldInfo {
   title "Simplified Robot Soccer - 1v1"
   basicTimeStep 64
   contactProperties [
+    # Ball vs floor: no bounce, moderate friction so ball rolls freely
     ContactProperties {
       material1 "ball"
       coulombFriction [ 0.5 ]
-      bounce 0.5
-      bounceVelocity 0.01
+      bounce 0.0
+      bounceVelocity 0.001
+      softCFM 0.0001
     }
+    # Ball vs robot body: no bounce, low friction for smooth deflection
     ContactProperties {
       material1 "ball"
       material2 "robot"
-      coulombFriction [ 0.3 ]
-      bounce 0.3
-      bounceVelocity 0.01
+      coulombFriction [ 0.2 ]
+      bounce 0.0
+      bounceVelocity 0.001
     }
   ]
 }
@@ -414,21 +420,23 @@ DEF ENDW_R_BOT Solid {
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  SOCCER BALL
-#  radius = 0.043 m (≈ size-1 ball scaled for E-puck arena)
-#  mass   = 40 g
+#  Orange sphere that rolls only in the XZ plane (bounce = 0, high Y-damping).
+#  radius = 0.043 m  |  mass = 40 g
+#  The supervisor also zeroes the Y velocity every step to keep it on the floor.
 # ─────────────────────────────────────────────────────────────────────────────
 DEF BALL Solid {
   translation 0 0.043 0
   children [
     Shape {
       appearance PBRAppearance {
-        baseColor 1 1 1
-        roughness 0.5
-        metalness 0
+        baseColor 0.96 0.44 0.04
+        roughness 0.60
+        metalness 0.0
+        emissiveColor 0.15 0.06 0.0
       }
       geometry Sphere {
         radius 0.043
-        subdivision 2
+        subdivision 3
       }
     }
   ]
@@ -442,22 +450,481 @@ DEF BALL Solid {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  ROBOTS
-#  Blue  starts in left half facing right  (+X)
-#  Red   starts in right half facing left  (-X)
+#  ROBOTS  –  Competition RoboCup F180 / SSL style
+#
+#  Coordinate frame:  robot translation y = wheel_radius  (origin at axle height)
+#    Body cylinder centred at robot origin (spans y = ±wheel_radius in local frame).
+#    Wheel Solids translated to local (0, 0, ±wheel_z).
+#    Wheel bounding = Sphere(wheel_radius) → lowest point at world y = 0.
+#
+#  TEAM A  "TITAN"  (DEF ROBOT_BLUE, blue markers)
+#    ø180 mm × 64 mm, wheel r=32 mm, 5 rad/s, 1.50 kg – slow, powerful, defensive
+#
+#  TEAM B  "VIPER"  (DEF ROBOT_RED, amber/yellow markers)
+#    ø140 mm × 52 mm, wheel r=26 mm, 14 rad/s, 0.70 kg – fast, agile, offensive
+#
+#  Motor axis [0 0 -1] on both wheels: +velocity → robot moves +localX.
+#  TITAN faces +X,  VIPER faces -X.
 # ─────────────────────────────────────────────────────────────────────────────
-DEF ROBOT_BLUE E-puck {
-  translation -0.75 0 0
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TEAM A  "TITAN"  –  Blue, large defensive robot
+#  ø180 mm × 60 mm,  wheel r=32 mm,  5 rad/s,  1.50 kg
+#  Robot origin at y = wheel_radius = 0.032 m
+#
+#  Key geometry:
+#    body h=0.060  →  bottom at world y=0.002 (2 mm clearance above floor)
+#    wheel z=±0.101 = body_r(0.090) + wheel_half_w(0.011)
+#                   → tyre inner face is FLUSH with body edge, no floating gap
+# ═══════════════════════════════════════════════════════════════════════════════
+DEF ROBOT_BLUE Robot {
+  translation -0.75 0.032 0
   rotation 0 1 0 0
   name "robot_blue"
   controller "robot_controller"
+  contactMaterial "robot"
+  children [
+
+    # ── 1. Main chassis – dark industrial steel ───────────────────────────────
+    #       h=0.060 → spans local y: -0.030 … +0.030
+    #       body bottom at world y = 0.032-0.030 = 0.002 m ✓
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.18 0.20 0.22
+        roughness 0.78
+        metalness 0.0
+      }
+      geometry Cylinder { radius 0.090 height 0.060 }
+    }
+
+    # ── 2. Bottom armor plate / bumper ring ───────────────────────────────────
+    Transform {
+      translation 0 -0.026 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.10 0.10 0.12 roughness 0.88 metalness 0 }
+          geometry Cylinder { radius 0.093 height 0.008 }
+        }
+      ]
+    }
+
+    # ── 3. Mid-body accent band ────────────────────────────────────────────────
+    Transform {
+      translation 0 -0.003 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.26 0.30 0.34 roughness 0.62 metalness 0 }
+          geometry Cylinder { radius 0.091 height 0.005 }
+        }
+      ]
+    }
+
+    # ── 4. Front dribbler slot – dark recess at body front edge ───────────────
+    Transform {
+      translation 0.088 -0.024 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.04 0.04 0.05 roughness 0.95 metalness 0 }
+          geometry Box { size 0.006 0.012 0.084 }
+        }
+      ]
+    }
+
+    # ── 5. Dribbler roller – brass-colored horizontal cylinder ────────────────
+    Transform {
+      translation 0.079 -0.022 0
+      children [
+        Transform {
+          rotation 1 0 0 1.5707963
+          children [
+            Shape {
+              appearance PBRAppearance { baseColor 0.56 0.44 0.14 roughness 0.48 metalness 0.45 }
+              geometry Cylinder { radius 0.011 height 0.092 }
+            }
+          ]
+        }
+      ]
+    }
+
+    # ── 6. Top electronics PCB layer – green circuit board ────────────────────
+    Transform {
+      translation 0 0.032 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.05 0.15 0.06 roughness 0.72 metalness 0 }
+          geometry Box { size 0.062 0.003 0.062 }
+        }
+      ]
+    }
+
+    # ── 7. Team identification plate – BLUE ───────────────────────────────────
+    Transform {
+      translation 0 0.034 0
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.04 0.14 0.72
+            roughness 0.25
+            metalness 0.0
+            emissiveColor 0.01 0.04 0.28
+          }
+          geometry Cylinder { radius 0.075 height 0.006 }
+        }
+      ]
+    }
+
+    # ── 8. Direction pointer – white triangle, flat on plate, tip → +X ───────
+    Transform {
+      translation 0 0.038 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 1 1 1 emissiveColor 0.72 0.72 0.72 roughness 0.2 metalness 0 }
+          geometry IndexedFaceSet {
+            coord Coordinate {
+              point [ 0.062 0 0   -0.021 0  0.040   -0.021 0 -0.040 ]
+            }
+            coordIndex [ 0 1 2 -1   2 1 0 -1 ]
+            solid FALSE
+          }
+        }
+      ]
+    }
+
+    # ── 9. Blue LED cluster – 4× at plate corners ─────────────────────────────
+    Transform {
+      translation  0.030 0.038  0.030
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.45 1.0 emissiveColor 0.10 0.22 0.85 roughness 0.2 metalness 0 } geometry Cylinder { radius 0.007 height 0.005 } } ]
+    }
+    Transform {
+      translation  0.030 0.038 -0.030
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.45 1.0 emissiveColor 0.10 0.22 0.85 roughness 0.2 metalness 0 } geometry Cylinder { radius 0.007 height 0.005 } } ]
+    }
+    Transform {
+      translation -0.030 0.038  0.030
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.45 1.0 emissiveColor 0.10 0.22 0.85 roughness 0.2 metalness 0 } geometry Cylinder { radius 0.007 height 0.005 } } ]
+    }
+    Transform {
+      translation -0.030 0.038 -0.030
+      children [ Shape { appearance PBRAppearance { baseColor 0.25 0.45 1.0 emissiveColor 0.10 0.22 0.85 roughness 0.2 metalness 0 } geometry Cylinder { radius 0.007 height 0.005 } } ]
+    }
+
+    # ── 10. Central electronics dome ──────────────────────────────────────────
+    Transform {
+      translation 0 0.040 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.20 0.20 0.22 roughness 0.65 metalness 0 }
+          geometry Cylinder { radius 0.018 height 0.008 }
+        }
+      ]
+    }
+
+    # ── 11. Supercapacitors – 2× vertical cylinders at rear ───────────────────
+    Transform {
+      translation -0.032 0.046 0.020
+      children [ Shape { appearance PBRAppearance { baseColor 0.14 0.14 0.16 roughness 0.58 metalness 0.18 } geometry Cylinder { radius 0.006 height 0.020 } } ]
+    }
+    Transform {
+      translation -0.032 0.046 -0.020
+      children [ Shape { appearance PBRAppearance { baseColor 0.14 0.14 0.16 roughness 0.58 metalness 0.18 } geometry Cylinder { radius 0.006 height 0.020 } } ]
+    }
+
+    # ── 12. Antenna stubs – 2× thin vertical rods at rear ─────────────────────
+    Transform {
+      translation -0.052 0.050 0.022
+      children [ Shape { appearance PBRAppearance { baseColor 0.38 0.38 0.40 roughness 0.70 metalness 0 } geometry Cylinder { radius 0.003 height 0.020 } } ]
+    }
+    Transform {
+      translation -0.052 0.050 -0.022
+      children [ Shape { appearance PBRAppearance { baseColor 0.38 0.38 0.40 roughness 0.70 metalness 0 } geometry Cylinder { radius 0.003 height 0.020 } } ]
+    }
+
+    # ── 13. Left drive wheel  (+Z side) ───────────────────────────────────────
+    #       z=0.101 = body_r(0.090) + wheel_half_w(0.011)
+    #       tyre inner face exactly flush with body edge — no gap
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 0 -1
+        anchor 0 0 0.101
+      }
+      device [
+        RotationalMotor { name "left wheel motor" maxVelocity 5.0 }
+      ]
+      endPoint Solid {
+        translation 0 0 0.101
+        children [
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.08 0.08 0.09 roughness 0.93 metalness 0 } geometry Cylinder { radius 0.032 height 0.022 } } ]
+          }
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.72 0.72 0.74 roughness 0.42 metalness 0.32 } geometry Cylinder { radius 0.015 height 0.024 } } ]
+          }
+          Shape { appearance PBRAppearance { baseColor 0.88 0.88 0.90 roughness 0.30 metalness 0.50 } geometry Sphere { radius 0.005 } }
+        ]
+        name "left_wheel_titan"
+        contactMaterial "robot"
+        boundingObject Sphere { radius 0.032 }
+        physics Physics { density -1 mass 0.10 }
+      }
+    }
+
+    # ── 14. Right drive wheel  (-Z side) ──────────────────────────────────────
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 0 -1
+        anchor 0 0 -0.101
+      }
+      device [
+        RotationalMotor { name "right wheel motor" maxVelocity 5.0 }
+      ]
+      endPoint Solid {
+        translation 0 0 -0.101
+        children [
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.08 0.08 0.09 roughness 0.93 metalness 0 } geometry Cylinder { radius 0.032 height 0.022 } } ]
+          }
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.72 0.72 0.74 roughness 0.42 metalness 0.32 } geometry Cylinder { radius 0.015 height 0.024 } } ]
+          }
+          Shape { appearance PBRAppearance { baseColor 0.88 0.88 0.90 roughness 0.30 metalness 0.50 } geometry Sphere { radius 0.005 } }
+        ]
+        name "right_wheel_titan"
+        contactMaterial "robot"
+        boundingObject Sphere { radius 0.032 }
+        physics Physics { density -1 mass 0.10 }
+      }
+    }
+
+    Receiver { name "receiver" channel -1 }
+
+  ]
+  boundingObject Cylinder { radius 0.090 height 0.060 }
+  physics Physics { density -1 mass 1.50 }
 }
 
-DEF ROBOT_RED E-puck {
-  translation 0.75 0 0
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TEAM B  "VIPER"  –  Amber/Yellow, compact offensive striker
+#  ø140 mm × 48 mm,  wheel r=26 mm,  14 rad/s,  0.70 kg
+#  Robot origin at y = wheel_radius = 0.026 m
+#
+#  Key geometry:
+#    body h=0.048  →  bottom at world y=0.002 (2 mm clearance above floor)
+#    wheel z=±0.079 = body_r(0.070) + wheel_half_w(0.009)
+#                   → tyre inner face FLUSH with body edge, no floating gap
+# ═══════════════════════════════════════════════════════════════════════════════
+DEF ROBOT_RED Robot {
+  translation 0.75 0.026 0
   rotation 0 1 0 3.14159265
   name "robot_red"
   controller "robot_controller"
+  contactMaterial "robot"
+  children [
+
+    # ── 1. Main chassis – carbon-fibre black ──────────────────────────────────
+    #       h=0.048 → spans local y: -0.024 … +0.024
+    #       body bottom at world y = 0.026-0.024 = 0.002 m ✓
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.07 0.07 0.08
+        roughness 0.82
+        metalness 0.0
+      }
+      geometry Cylinder { radius 0.070 height 0.048 }
+    }
+
+    # ── 2. Slim bottom bumper ring ────────────────────────────────────────────
+    Transform {
+      translation 0 -0.020 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.08 0.08 0.09 roughness 0.90 metalness 0 }
+          geometry Cylinder { radius 0.072 height 0.008 }
+        }
+      ]
+    }
+
+    # ── 3. Orange accent stripe – mid-body ────────────────────────────────────
+    Transform {
+      translation 0 -0.001 0
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.92 0.48 0.00
+            roughness 0.50
+            metalness 0.0
+            emissiveColor 0.30 0.12 0.00
+          }
+          geometry Cylinder { radius 0.071 height 0.004 }
+        }
+      ]
+    }
+
+    # ── 4. Upper shoulder – tapered section ────────────────────────────────────
+    Transform {
+      translation 0 0.016 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.20 0.20 0.22 roughness 0.75 metalness 0 }
+          geometry Cylinder { radius 0.060 height 0.014 }
+        }
+      ]
+    }
+
+    # ── 5. Front dribbler slot – dark recess ──────────────────────────────────
+    Transform {
+      translation 0.068 -0.018 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.04 0.04 0.05 roughness 0.95 metalness 0 }
+          geometry Box { size 0.006 0.010 0.062 }
+        }
+      ]
+    }
+
+    # ── 6. Dribbler roller – compact brass cylinder ───────────────────────────
+    Transform {
+      translation 0.061 -0.016 0
+      children [
+        Transform {
+          rotation 1 0 0 1.5707963
+          children [
+            Shape {
+              appearance PBRAppearance { baseColor 0.56 0.44 0.14 roughness 0.48 metalness 0.45 }
+              geometry Cylinder { radius 0.008 height 0.072 }
+            }
+          ]
+        }
+      ]
+    }
+
+    # ── 7. Team identification top cap – amber/yellow ─────────────────────────
+    Transform {
+      translation 0 0.026 0
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.94 0.62 0.00
+            roughness 0.28
+            metalness 0.0
+            emissiveColor 0.32 0.18 0.00
+          }
+          geometry Cylinder { radius 0.052 height 0.006 }
+        }
+      ]
+    }
+
+    # ── 8. Direction pointer – white triangle, flat on cap, tip → +X ──────────
+    Transform {
+      translation 0 0.030 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 1 1 1 emissiveColor 0.72 0.72 0.72 roughness 0.2 metalness 0 }
+          geometry IndexedFaceSet {
+            coord Coordinate {
+              point [ 0.044 0 0   -0.015 0  0.030   -0.015 0 -0.030 ]
+            }
+            coordIndex [ 0 1 2 -1   2 1 0 -1 ]
+            solid FALSE
+          }
+        }
+      ]
+    }
+
+    # ── 9. Amber LED pair – front-biased ──────────────────────────────────────
+    Transform {
+      translation  0.024 0.031  0.018
+      children [ Shape { appearance PBRAppearance { baseColor 1.0 0.62 0.0 emissiveColor 0.65 0.32 0.00 roughness 0.2 metalness 0 } geometry Cylinder { radius 0.006 height 0.005 } } ]
+    }
+    Transform {
+      translation  0.024 0.031 -0.018
+      children [ Shape { appearance PBRAppearance { baseColor 1.0 0.62 0.0 emissiveColor 0.65 0.32 0.00 roughness 0.2 metalness 0 } geometry Cylinder { radius 0.006 height 0.005 } } ]
+    }
+
+    # ── 10. Central electronics dome ──────────────────────────────────────────
+    Transform {
+      translation 0 0.032 0
+      children [
+        Shape {
+          appearance PBRAppearance { baseColor 0.18 0.18 0.20 roughness 0.68 metalness 0 }
+          geometry Cylinder { radius 0.013 height 0.007 }
+        }
+      ]
+    }
+
+    # ── 11. Compact antenna – single rear stub ────────────────────────────────
+    Transform {
+      translation -0.040 0.032 0
+      children [ Shape { appearance PBRAppearance { baseColor 0.40 0.40 0.42 roughness 0.70 metalness 0 } geometry Cylinder { radius 0.002 height 0.016 } } ]
+    }
+
+    # ── 12. Left drive wheel  (+Z side) ───────────────────────────────────────
+    #       z=0.079 = body_r(0.070) + wheel_half_w(0.009)
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 0 -1
+        anchor 0 0 0.079
+      }
+      device [
+        RotationalMotor { name "left wheel motor" maxVelocity 14.0 }
+      ]
+      endPoint Solid {
+        translation 0 0 0.079
+        children [
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.08 0.08 0.09 roughness 0.93 metalness 0 } geometry Cylinder { radius 0.026 height 0.018 } } ]
+          }
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.72 0.72 0.74 roughness 0.42 metalness 0.32 } geometry Cylinder { radius 0.012 height 0.020 } } ]
+          }
+          Shape { appearance PBRAppearance { baseColor 0.88 0.88 0.90 roughness 0.30 metalness 0.50 } geometry Sphere { radius 0.004 } }
+        ]
+        name "left_wheel_viper"
+        contactMaterial "robot"
+        boundingObject Sphere { radius 0.026 }
+        physics Physics { density -1 mass 0.07 }
+      }
+    }
+
+    # ── 13. Right drive wheel  (-Z side) ──────────────────────────────────────
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        axis 0 0 -1
+        anchor 0 0 -0.079
+      }
+      device [
+        RotationalMotor { name "right wheel motor" maxVelocity 14.0 }
+      ]
+      endPoint Solid {
+        translation 0 0 -0.079
+        children [
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.08 0.08 0.09 roughness 0.93 metalness 0 } geometry Cylinder { radius 0.026 height 0.018 } } ]
+          }
+          Transform {
+            rotation 1 0 0 1.5707963
+            children [ Shape { appearance PBRAppearance { baseColor 0.72 0.72 0.74 roughness 0.42 metalness 0.32 } geometry Cylinder { radius 0.012 height 0.020 } } ]
+          }
+          Shape { appearance PBRAppearance { baseColor 0.88 0.88 0.90 roughness 0.30 metalness 0.50 } geometry Sphere { radius 0.004 } }
+        ]
+        name "right_wheel_viper"
+        contactMaterial "robot"
+        boundingObject Sphere { radius 0.026 }
+        physics Physics { density -1 mass 0.07 }
+      }
+    }
+
+    Receiver { name "receiver" channel -1 }
+
+  ]
+  boundingObject Cylinder { radius 0.070 height 0.048 }
+  physics Physics { density -1 mass 0.70 }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
