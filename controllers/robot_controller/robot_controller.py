@@ -1,85 +1,133 @@
 """
 robot_controller.py
 -------------------
-Webots controller that runs inside each F180-style soccer robot.
+Webots controller para robôs F180 omnidirecionais com 3 rodas.
 
-The supervisor sends wheel-speed commands via a broadcast Emitter (channel -1).
-Every message is prefixed with the target robot name so each robot only acts
-on commands that belong to it.
+O supervisor envia comandos via Emitter (canal -1) no formato:
+    "<prefix> <vx> <vz> <omega>"
+onde:
+    vx    – velocidade linear no eixo X do robô (m/s)
+    vz    – velocidade linear no eixo Z do robô (m/s)
+    omega – velocidade angular em torno de Y (rad/s), positivo = anti-horário
 
-Message format (UTF-8 string):   "<prefix> <left_v> <right_v>"
-  e.g.  "blue 6.2832 -3.1416"
+Cinemática inversa omni 3 rodas (θ₁=90°, θ₂=210°, θ₃=330°):
+    ω_i = ( -sin(θ_i)*vx + cos(θ_i)*vz + L*omega ) / r_roda
 
-The robot's prefix is derived from its Webots name field:
-  name "robot_blue"  →  prefix "blue"
-  name "robot_red"   →  prefix "red"
+onde L é a distância do centro às rodas (m) e r_roda é o raio da roda (m).
 
-Motor convention (both wheels share axis 0 0 -1):
-  Positive velocity  →  robot moves forward  (+local X)
-  Both motors equal  →  straight line
-  Left > Right       →  turns right
-  Left < Right       →  turns left
+Parâmetros por robô (devem corresponder aos valores no soccer.wbt):
+    TITAN (blue): L=0.090m, r_roda=0.032m, maxVelocity=5 rad/s
+    VIPER  (red): L=0.070m, r_roda=0.026m, maxVelocity=14 rad/s
 
-Per-robot speed limits (must match maxVelocity in soccer.wbt):
-  blue  →   5.0 rad/s  (TITAN: large defensive)
-  red   →  14.0 rad/s  (VIPER: compact offensive)
+Prefixo derivado do nome Webots:
+    "robot_blue" → "blue"
+    "robot_red"  → "red"
 """
 
+import math
 from controller import Robot
 
-# Per-robot physical speed ceilings — must match the VRML maxVelocity values.
-MAX_SPEED_BY_ROBOT = {
-    "blue":  5.0,   # TITAN
-    "red":  14.0,   # VIPER
+# ── Parâmetros físicos por robô ───────────────────────────────────────────────
+# L   = distância do centro geométrico ao ponto de contacto de cada roda (m)
+# r   = raio da roda (m)
+# max = velocidade angular máxima das rodas (rad/s) — deve coincidir com soccer.wbt
+ROBOT_PARAMS = {
+    "blue": {"L": 0.090, "r": 0.032, "max_vel": 5.0},   # TITAN: grande, defensivo
+    "red":  {"L": 0.070, "r": 0.026, "max_vel": 14.0},  # VIPER: compacto, ofensivo
 }
-DEFAULT_MAX_SPEED = 14.0   # fallback for any unknown name
+DEFAULT_PARAMS = {"L": 0.080, "r": 0.030, "max_vel": 14.0}
 
-TIME_STEP = 64             # ms – must match WorldInfo.basicTimeStep
+# Ângulos das rodas (rad) — mesmo para os dois robôs (triângulo equilátero)
+WHEEL_ANGLES = [
+    math.radians(90),   # W1 — frente
+    math.radians(210),  # W2 — trás-esquerda
+    math.radians(330),  # W3 — trás-direita
+]
+
+TIME_STEP = 64  # ms — deve coincidir com WorldInfo.basicTimeStep
+
+
+def omni_inverse_kinematics(vx, vz, omega, L, r):
+    """
+    Calcula as velocidades angulares de cada roda (rad/s) para um robô
+    omnidirecional com 3 rodas a 120°.
+
+    Referencial do robô:
+        X — frente do robô
+        Z — lateral (esquerda positiva)
+        Y — cima
+
+    Args:
+        vx    (float): velocidade linear em X (m/s)
+        vz    (float): velocidade linear em Z (m/s)
+        omega (float): velocidade angular em Y (rad/s)
+        L     (float): distância centro→roda (m)
+        r     (float): raio da roda (m)
+
+    Returns:
+        list[float]: [w1, w2, w3] velocidades angulares em rad/s
+    """
+    speeds = []
+    for theta in WHEEL_ANGLES:
+        # Componente de translação que esta roda deve fornecer
+        v_wheel = -math.sin(theta) * vx + math.cos(theta) * vz + L * omega
+        # Converter velocidade linear na roda para velocidade angular
+        speeds.append(v_wheel / r)
+    return speeds
 
 
 def run():
     robot = Robot()
 
-    # Derive prefix from the robot's name: "robot_blue" → "blue"
+    # Derivar prefixo do nome Webots: "robot_blue" → "blue"
     full_name = robot.getName()
-    prefix    = full_name.split("_", 1)[-1]
-    max_speed = MAX_SPEED_BY_ROBOT.get(prefix, DEFAULT_MAX_SPEED)
+    prefix = full_name.split("_", 1)[-1]
+    params = ROBOT_PARAMS.get(prefix, DEFAULT_PARAMS)
+    L       = params["L"]
+    r       = params["r"]
+    max_vel = params["max_vel"]
 
-    # ── Motors ────────────────────────────────────────────────────────────────
-    left_motor  = robot.getDevice("left wheel motor")
-    right_motor = robot.getDevice("right wheel motor")
-    left_motor.setPosition(float("inf"))    # velocity-control mode
-    right_motor.setPosition(float("inf"))
-    left_motor.setVelocity(0.0)
-    right_motor.setVelocity(0.0)
+    # ── Motores das 3 rodas ───────────────────────────────────────────────────
+    motors = []
+    for i in range(1, 4):
+        m = robot.getDevice(f"wheel{i} motor")
+        if m is None:
+            raise RuntimeError(f"Motor 'wheel{i} motor' não encontrado no robô '{full_name}'")
+        m.setPosition(float("inf"))   # modo velocidade
+        m.setVelocity(0.0)
+        motors.append(m)
 
-    # ── Receiver – listens for supervisor commands (broadcast channel -1) ─────
+    # ── Receptor — ouve comandos do supervisor (canal -1) ────────────────────
     receiver = robot.getDevice("receiver")
     if receiver:
         receiver.enable(TIME_STEP)
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    # ── Loop principal ────────────────────────────────────────────────────────
     while robot.step(TIME_STEP) != -1:
         if receiver is None:
             continue
 
-        # Drain the queue; act only on the most recent command for this robot.
-        left_v, right_v = None, None
+        # Esvaziar fila; actuar apenas no comando mais recente para este robô.
+        vx, vz, omega = None, None, None
         while receiver.getQueueLength() > 0:
             raw = receiver.getString()
             receiver.nextPacket()
             parts = raw.strip().split()
-            if len(parts) == 3 and parts[0] == prefix:
+            # Formato esperado: "<prefix> <vx> <vz> <omega>"
+            if len(parts) == 4 and parts[0] == prefix:
                 try:
-                    left_v  = float(parts[1])
-                    right_v = float(parts[2])
+                    vx    = float(parts[1])
+                    vz    = float(parts[2])
+                    omega = float(parts[3])
                 except ValueError:
                     pass
 
-        if left_v is not None:
-            left_motor.setVelocity(max(-max_speed, min(max_speed, left_v)))
-            right_motor.setVelocity(max(-max_speed, min(max_speed, right_v)))
-        # If no command arrived this step, keep the previous wheel velocities.
+        if vx is not None:
+            wheel_speeds = omni_inverse_kinematics(vx, vz, omega, L, r)
+            for motor, speed in zip(motors, wheel_speeds):
+                clamped = max(-max_vel, min(max_vel, speed))
+                motor.setVelocity(clamped)
+        # Sem comando neste step → mantém velocidades anteriores
 
 
 if __name__ == "__main__":
