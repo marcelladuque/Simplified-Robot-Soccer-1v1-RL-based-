@@ -1,80 +1,97 @@
 """
 supervisor_controller.py
 ------------------------
-Webots Supervisor controller.  This is the brain of the RL training loop:
+Webots Supervisor controller — loop de treino RL para robôs F180 omni.
 
-  1. Reset  – relocate the ball and both robots to their starting positions.
-  2. Observe – read positions / velocities from the simulation.
-  3. Step    – send wheel commands to each robot and advance one time-step.
-  4. Reward  – detect goal events and assign a scalar reward.
-  5. Done    – signal episode end on goal or timeout.
+Fluxo:
+  1. Reset  – reposicionar bola e robôs nas posições iniciais.
+  2. Observe – ler posições/velocidades da simulação.
+  3. Step   – enviar comandos omni (vx, vz, omega) a cada robô e avançar.
+  4. Reward – detectar golos e calcular recompensa escalar.
+  5. Done   – sinalizar fim de episódio por golo ou timeout.
 
-Field constants (from soccer.wbt)
-  Playing area: X ∈ [-1.5, +1.5],  Z ∈ [-1.0, +1.0]
-  Left  goal mouth at x = -1.5,  posts at z = ±0.35
-  Right goal mouth at x = +1.5,  posts at z = ±0.35
-  Ball radius = 0.043 m
+Constantes do campo (de soccer.wbt):
+  Área de jogo: X ∈ [-1.5, +1.5],  Z ∈ [-1.0, +1.0]
+  Boca da baliza esquerda:  x = -1.5,  postes em z = ±0.35
+  Boca da baliza direita:   x = +1.5,  postes em z = ±0.35
+  Raio da bola = 0.043 m
 
-Robot speed limits (must match maxVelocity in soccer.wbt)
-  TITAN  (ROBOT_BLUE) – large defensive  →   5.0 rad/s
-  VIPER  (ROBOT_RED)  – compact offensive → 14.0 rad/s
+Limites de velocidade dos robôs (devem coincidir com maxVelocity no soccer.wbt):
+  TITAN (ROBOT_BLUE) – grande, defensivo  →  5.0 rad/s nas rodas
+  VIPER (ROBOT_RED)  – compacto, ofensivo → 14.0 rad/s nas rodas
+
+Formato do comando enviado ao robot_controller:
+  "<prefix> <vx> <vz> <omega>"
+  vx    = velocidade linear X do robô (m/s)
+  vz    = velocidade linear Z do robô (m/s)
+  omega = velocidade angular em Y (rad/s)
+
+Espaço de acções (por robô):
+  (vx, vz, omega) — 3 floats contínuos
 """
 
 import math
 from controller import Supervisor
 
-# ── Simulation constants ──────────────────────────────────────────────────────
-TIME_STEP        = 64       # ms – must match WorldInfo.basicTimeStep
-EPISODE_DURATION = 60       # seconds per episode
+# ── Constantes de simulação ───────────────────────────────────────────────────
+TIME_STEP        = 64       # ms — deve coincidir com WorldInfo.basicTimeStep
+EPISODE_DURATION = 60       # segundos por episódio
 
-# Per-robot speed ceilings (must match maxVelocity in soccer.wbt)
-BLUE_MAX_SPEED =  5.0       # rad/s – TITAN: large defensive
-RED_MAX_SPEED  = 14.0       # rad/s – VIPER: compact offensive
+# ── Parâmetros físicos por robô ───────────────────────────────────────────────
+# L_roda × max_vel_roda ≈ velocidade linear máxima do robô
+# TITAN:  L=0.090 × 5.0  ≈ 0.45 m/s
+# VIPER:  L=0.070 × 14.0 ≈ 0.98 m/s
+BLUE_WHEEL_MAX = 5.0    # rad/s  — TITAN
+RED_WHEEL_MAX  = 14.0   # rad/s  — VIPER
 
-# Common normalisation denominator for observations (use the faster robot's max)
-NORM_SPEED = RED_MAX_SPEED
+BLUE_L = 0.090          # m — distância centro→roda TITAN
+RED_L  = 0.070          # m — distância centro→roda VIPER
+BLUE_R = 0.032          # m — raio da roda TITAN
+RED_R  = 0.026          # m — raio da roda VIPER
 
-# ── Field geometry ────────────────────────────────────────────────────────────
+# Velocidade linear máxima aproximada (usada para normalizar observações)
+BLUE_MAX_LINEAR = BLUE_L * BLUE_WHEEL_MAX   # ~0.45 m/s
+RED_MAX_LINEAR  = RED_L  * RED_WHEEL_MAX    # ~0.98 m/s
+NORM_SPEED = RED_MAX_LINEAR                 # denominador comum de normalização
+
+# ── Geometria do campo ────────────────────────────────────────────────────────
 FIELD_X_HALF = 1.5
 FIELD_Z_HALF = 1.0
 GOAL_Z_HALF  = 0.35
 BALL_RADIUS  = 0.043
 
-# ── Spawn positions ───────────────────────────────────────────────────────────
-# Robot y = wheel_radius so the wheel Sphere bounding objects rest at y = 0.
-BLUE_WHEEL_RADIUS = 0.032   # m – TITAN
-RED_WHEEL_RADIUS  = 0.026   # m – VIPER
+# ── Posições de spawn ─────────────────────────────────────────────────────────
+# Y de spawn = raio da roda para que a roda repouse exactamente no chão (y=0)
+BLUE_SPAWN = (-0.75, BLUE_R, 0.0)
+RED_SPAWN  = ( 0.75, RED_R,  0.0)
+BALL_SPAWN = ( 0.0,  BALL_RADIUS, 0.0)
 
-BLUE_SPAWN = (-0.75, BLUE_WHEEL_RADIUS, 0.0)
-RED_SPAWN  = ( 0.75, RED_WHEEL_RADIUS,  0.0)
-BALL_SPAWN = ( 0.0,  BALL_RADIUS,       0.0)
-
-# ── Rotation helpers (axis-angle around Y) ────────────────────────────────────
-ROT_FACING_RIGHT = [0, 1, 0, 0]          # blue robot: faces +X
-ROT_FACING_LEFT  = [0, 1, 0, math.pi]   # red  robot: faces -X
+# ── Rotações iniciais (axis-angle em torno de Y) ──────────────────────────────
+ROT_FACING_RIGHT = [0, 1, 0, 0]           # robô azul: frente em +X
+ROT_FACING_LEFT  = [0, 1, 0, math.pi]    # robô vermelho: frente em -X
 
 
 class SoccerSupervisor:
     def __init__(self):
         self.sv = Supervisor()
 
-        # ── Grab node handles ─────────────────────────────────────────────────
+        # ── Nós do mundo ──────────────────────────────────────────────────────
         self.ball_node = self.sv.getFromDef("BALL")
         self.blue_node = self.sv.getFromDef("ROBOT_BLUE")
         self.red_node  = self.sv.getFromDef("ROBOT_RED")
 
-        assert self.ball_node, "DEF BALL not found in .wbt"
-        assert self.blue_node, "DEF ROBOT_BLUE not found in .wbt"
-        assert self.red_node,  "DEF ROBOT_RED not found in .wbt"
+        assert self.ball_node, "DEF BALL não encontrado no .wbt"
+        assert self.blue_node, "DEF ROBOT_BLUE não encontrado no .wbt"
+        assert self.red_node,  "DEF ROBOT_RED não encontrado no .wbt"
 
-        # Translation / rotation fields used for resets
+        # Campos de translação/rotação usados nos resets
         self.ball_trans = self.ball_node.getField("translation")
         self.blue_trans = self.blue_node.getField("translation")
         self.blue_rot   = self.blue_node.getField("rotation")
         self.red_trans  = self.red_node.getField("translation")
         self.red_rot    = self.red_node.getField("rotation")
 
-        # Emitters – supervisor → robots
+        # Emissores — supervisor → robôs
         self.emitter_blue = self.sv.getDevice("emitter_blue")
         self.emitter_red  = self.sv.getDevice("emitter_red")
 
@@ -83,17 +100,17 @@ class SoccerSupervisor:
         self.score_blue    = 0
         self.score_red     = 0
 
-    # ── Public API (call from the RL agent) ───────────────────────────────────
+    # ── API pública (chamada pelo agente RL) ──────────────────────────────────
 
     def reset(self):
-        """Move all objects back to their start positions; return initial obs."""
+        """Reposiciona todos os objectos; devolve observação inicial."""
         self._place(self.ball_trans, BALL_SPAWN)
         self._place(self.blue_trans, BLUE_SPAWN)
         self._place(self.red_trans,  RED_SPAWN)
         self.blue_rot.setSFRotation(ROT_FACING_RIGHT)
         self.red_rot.setSFRotation(ROT_FACING_LEFT)
 
-        # Zero ball momentum so it does not carry across episodes.
+        # Zerar momento da bola entre episódios
         self.ball_node.setVelocity([0, 0, 0, 0, 0, 0])
 
         self.episode_steps = 0
@@ -102,20 +119,26 @@ class SoccerSupervisor:
 
     def step(self, blue_action, red_action):
         """
-        Apply actions, advance the simulation, return (obs, reward, done, info).
+        Aplica acções, avança a simulação, devolve (obs, reward, done, info).
 
-        Actions are (left_wheel_speed, right_wheel_speed) tuples in rad/s.
-        Blue  is clipped to ± BLUE_MAX_SPEED.
-        Red   is clipped to ± RED_MAX_SPEED.
+        Acções são tuplos (vx, vz, omega):
+            vx    – velocidade linear X  (m/s)
+            vz    – velocidade linear Z  (m/s)
+            omega – velocidade angular Y (rad/s)
+
+        Os limites máximos são impostos antes de enviar ao controlador:
+            Blue (TITAN): v_max_linear ≈ 0.45 m/s, omega_max ≈ 5.0 rad/s
+            Red  (VIPER): v_max_linear ≈ 0.98 m/s, omega_max ≈ 14.0 rad/s
         """
-        self._send_command(self.emitter_blue, "blue", blue_action,  BLUE_MAX_SPEED)
-        self._send_command(self.emitter_red,  "red",  red_action,   RED_MAX_SPEED)
+        self._send_omni_command(self.emitter_blue, "blue", blue_action,
+                                BLUE_MAX_LINEAR, BLUE_WHEEL_MAX)
+        self._send_omni_command(self.emitter_red,  "red",  red_action,
+                                RED_MAX_LINEAR,  RED_WHEEL_MAX)
 
         self.sv.step(TIME_STEP)
         self.episode_steps += 1
 
-        # Keep ball in the XZ floor plane: zero any vertical velocity/spin
-        # so it never bounces up or rolls off the ground.
+        # Manter bola no plano XZ do chão
         self._constrain_ball_to_floor()
 
         obs              = self._get_observation()
@@ -128,25 +151,25 @@ class SoccerSupervisor:
                 self.score_blue += 1
             else:
                 self.score_red += 1
-            print(f"GOAL! Scorer: {goal_info['scorer']}  "
-                  f"Score: Blue {self.score_blue} – {self.score_red} Red")
+            print(f"GOLO! Marcador: {goal_info['scorer']}  "
+                  f"Placar: Blue {self.score_blue} – {self.score_red} Red")
 
         return obs, reward, done, info
 
-    # ── Observation ───────────────────────────────────────────────────────────
+    # ── Observação ────────────────────────────────────────────────────────────
 
     def _get_observation(self):
         """
-        Returns a flat list of 10 values (all in [-1, 1]):
+        Devolve lista plana de 10 valores em [-1, 1]:
           [ball_x, ball_z,
            blue_x, blue_z, blue_heading,
            red_x,  red_z,  red_heading,
            ball_vx, ball_vz]
 
-        Positions are normalised by half-field dimensions.
-        Velocities are normalised by NORM_SPEED (= BLUE_MAX_SPEED = 12 rad/s).
+        Posições normalizadas pelas semi-dimensões do campo.
+        Velocidades normalizadas por NORM_SPEED.
         """
-        bpos  = self.ball_node.getPosition()   # [x, y, z]
+        bpos  = self.ball_node.getPosition()
         blpos = self.blue_node.getPosition()
         rpos  = self.red_node.getPosition()
         bvel  = self.ball_node.getVelocity()   # [vx, vy, vz, wx, wy, wz]
@@ -167,83 +190,83 @@ class SoccerSupervisor:
             bvel[2]  / NORM_SPEED,
         ]
 
-    # ── Reward ────────────────────────────────────────────────────────────────
+    # ── Recompensa ────────────────────────────────────────────────────────────
 
     def _compute_reward(self):
         """
-        Dense + sparse reward for the BLUE robot (agent).
+        Recompensa densa + esparsa para o robô BLUE (agente).
 
-        Positive events:
-          +10  scoring in the RIGHT goal
-          +0.1 per step the ball moves toward the right goal (dense shaping)
+        Positivo:
+          +10   golo na baliza DIREITA
+          +0.1  por step que a bola se move em direcção à baliza direita
 
-        Negative events:
-          -10  conceding into the LEFT goal
-          -0.01 per step (time penalty to encourage fast play)
+        Negativo:
+          -10   golo na baliza ESQUERDA
+          -0.01 por step (penalidade de tempo)
         """
         bpos = self.ball_node.getPosition()
         bx, bz = bpos[0], bpos[2]
 
         info   = {"goal": False, "scorer": None}
-        reward = -0.01  # time penalty
+        reward = -0.01  # penalidade de tempo
 
-        # Ball crosses RIGHT goal line → blue scores
+        # Bola ultrapassa a linha direita → blue marca
         if bx > FIELD_X_HALF and abs(bz) < GOAL_Z_HALF:
             reward += 10.0
             info = {"goal": True, "scorer": "blue"}
             return reward, info
 
-        # Ball crosses LEFT goal line → red scores (blue concedes)
+        # Bola ultrapassa a linha esquerda → red marca (blue sofre)
         if bx < -FIELD_X_HALF and abs(bz) < GOAL_Z_HALF:
             reward -= 10.0
             info = {"goal": True, "scorer": "red"}
             return reward, info
 
-        # Dense shaping: reward ball moving toward the right goal
+        # Shaping denso: bola a mover-se em direcção à baliza direita
         bvel = self.ball_node.getVelocity()
         if bvel[0] > 0:
             reward += 0.1 * bvel[0] / NORM_SPEED
 
         return reward, info
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ── Auxiliares ────────────────────────────────────────────────────────────
 
     def _constrain_ball_to_floor(self):
-        """
-        Force the ball to stay in the XZ floor plane after every simulation step.
-        - Resets Y position to BALL_RADIUS if it has drifted off the floor.
-        - Zeroes only the Y linear velocity so the ball never bounces upward
-          while still being allowed to roll freely (angular velocities kept).
-        """
+        """Força a bola a permanecer no plano XZ do chão após cada step."""
         pos = self.ball_node.getPosition()
-        vel = self.ball_node.getVelocity()   # [vx, vy, vz, wx, wy, wz]
+        vel = self.ball_node.getVelocity()
 
         if abs(pos[1] - BALL_RADIUS) > 0.001:
             self.ball_trans.setSFVec3f([pos[0], BALL_RADIUS, pos[2]])
         if abs(vel[1]) > 0.001:
-            # Zero only the vertical (Y) linear velocity; preserve rolling spin.
             self.ball_node.setVelocity([vel[0], 0.0, vel[2],
                                         vel[3], vel[4], vel[5]])
 
     def _place(self, trans_field, xyz):
         trans_field.setSFVec3f(list(xyz))
 
-    def _send_command(self, emitter, robot_prefix, action, max_speed):
-        """Send 'prefix left_v right_v' so each robot can self-filter."""
+    def _send_omni_command(self, emitter, prefix, action,
+                           max_linear, max_omega):
+        """
+        Envia comando omni ao robô no formato '<prefix> <vx> <vz> <omega>'.
+
+        Limita vx e vz a ±max_linear, e omega a ±max_omega.
+        """
         if emitter is None:
             return
-        left_v  = max(-max_speed, min(max_speed, action[0]))
-        right_v = max(-max_speed, min(max_speed, action[1]))
-        emitter.send(f"{robot_prefix} {left_v:.4f} {right_v:.4f}".encode())
+        vx    = max(-max_linear, min(max_linear, float(action[0])))
+        vz    = max(-max_linear, min(max_linear, float(action[1])))
+        omega = max(-max_omega,  min(max_omega,  float(action[2])))
+        emitter.send(f"{prefix} {vx:.4f} {vz:.4f} {omega:.4f}".encode())
 
     def _get_yaw(self, node):
-        """Extract yaw (rotation around Y) from axis-angle rotation field."""
+        """Extrai yaw (rotação em Y) do campo rotation em axis-angle."""
         ax, ay, az, angle = node.getField("rotation").getSFRotation()
         return angle * (1 if ay > 0 else -1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Entry point – random-agent smoke test (5 episodes)
+#  Ponto de entrada — teste com agente aleatório (5 episódios)
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import random
@@ -256,15 +279,18 @@ if __name__ == "__main__":
         total_reward = 0.0
 
         while not done:
+            # Acção aleatória: (vx, vz, omega)
             blue_action = (
-                random.uniform(-BLUE_MAX_SPEED, BLUE_MAX_SPEED),
-                random.uniform(-BLUE_MAX_SPEED, BLUE_MAX_SPEED),
+                random.uniform(-BLUE_MAX_LINEAR, BLUE_MAX_LINEAR),
+                random.uniform(-BLUE_MAX_LINEAR, BLUE_MAX_LINEAR),
+                random.uniform(-BLUE_WHEEL_MAX,  BLUE_WHEEL_MAX),
             )
             red_action = (
-                random.uniform(-RED_MAX_SPEED, RED_MAX_SPEED),
-                random.uniform(-RED_MAX_SPEED, RED_MAX_SPEED),
+                random.uniform(-RED_MAX_LINEAR, RED_MAX_LINEAR),
+                random.uniform(-RED_MAX_LINEAR, RED_MAX_LINEAR),
+                random.uniform(-RED_WHEEL_MAX,  RED_WHEEL_MAX),
             )
             obs, reward, done, info = env.step(blue_action, red_action)
             total_reward += reward
 
-        print(f"Episode {episode + 1}  total reward: {total_reward:.2f}")
+        print(f"Episódio {episode + 1}  recompensa total: {total_reward:.2f}")
