@@ -13,15 +13,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 WorldInfo {
   title "Simplified Robot Soccer - 1v1"
-  basicTimeStep 64
+  basicTimeStep 16
   contactProperties [
-    # Ball vs floor: no bounce, moderate friction so ball rolls freely
+    # Ball vs floor: high friction + zero softCFM so the ball decelerates
+    # naturally and never drifts on its own due to constraint-force noise.
     ContactProperties {
       material1 "ball"
-      coulombFriction [ 0.5 ]
+      coulombFriction [ 0.8 ]
       bounce 0.0
       bounceVelocity 0.001
-      softCFM 0.0001
     }
     # Ball vs robot body: no bounce, low friction for smooth deflection
     ContactProperties {
@@ -213,16 +213,33 @@ DEF CENTRE_CIRCLE Solid {
   locked TRUE
 }
 
-# Centre spot
+# Centre spot – flat filled disc using an IndexedFaceSet (fan triangulation).
+# IndexedFaceSet has NO side geometry, so it is perfectly flush with the floor
+# from every camera angle.  Same translation/Y as the centre circle ring.
 DEF CTR_SPOT Solid {
   translation 0 0.002 0
   name "ctr_spot"
   children [
     Shape {
       appearance USE LINE_APP
-      geometry Cylinder {
-        height 0.003
-        radius 0.035
+      geometry IndexedFaceSet {
+        coord Coordinate {
+          point [
+            0.0000 0  0.0000
+            0.0350 0  0.0000   0.0323 0  0.0134   0.0247 0  0.0247   0.0134 0  0.0323
+            0.0000 0  0.0350  -0.0134 0  0.0323  -0.0247 0  0.0247  -0.0323 0  0.0134
+           -0.0350 0  0.0000  -0.0323 0 -0.0134  -0.0247 0 -0.0247  -0.0134 0 -0.0323
+            0.0000 0 -0.0350   0.0134 0 -0.0323   0.0247 0 -0.0247   0.0323 0 -0.0134
+          ]
+        }
+        coordIndex [
+          0  1  2 -1   0  2  3 -1   0  3  4 -1   0  4  5 -1
+          0  5  6 -1   0  6  7 -1   0  7  8 -1   0  8  9 -1
+          0  9 10 -1   0 10 11 -1   0 11 12 -1   0 12 13 -1
+          0 13 14 -1   0 14 15 -1   0 15 16 -1   0 16  1 -1
+        ]
+        solid FALSE
+        creaseAngle 0
       }
     }
   ]
@@ -313,9 +330,14 @@ DEF GOAL_R_CROSS Solid {
   locked TRUE
 }
 
-# Solid dark-gray arena boards - 0.10m thick sidelines, 0.08m thick end sections
+# Solid dark-gray arena boards  –  thin natural boards (0.10 m sidelines,
+# 0.08 m end walls).  Tunnelling is prevented by the reduced basicTimeStep
+# (16 ms) rather than by thick geometry.
+#   Sideline walls (z): inner face at z = ±1.20, centre at z = ±1.25
+#   End walls      (x): inner face at x = ±1.85, centre at x = ±1.89
+#     → 20 cm padding sidelines, 35 cm padding end lines
 DEF WALL_NEAR Solid {
-  translation 0 0.175 1.05
+  translation 0 0.175 1.25
   name "wall_near"
   children [
     Shape {
@@ -325,95 +347,63 @@ DEF WALL_NEAR Solid {
         metalness 0.05
       }
       geometry Box {
-        size 3.28 0.35 0.1
+        size 3.90 0.35 0.10
       }
     }
   ]
   boundingObject Box {
-    size 3.28 0.35 0.1
+    size 3.90 0.35 0.10
   }
   locked TRUE
 }
 DEF WALL_FAR Solid {
-  translation 0 0.175 -1.05
+  translation 0 0.175 -1.25
   name "wall_far"
   children [
     Shape {
       appearance USE WALL_APP
       geometry Box {
-        size 3.28 0.35 0.1
+        size 3.90 0.35 0.10
       }
     }
   ]
   boundingObject Box {
-    size 3.28 0.35 0.1
+    size 3.90 0.35 0.10
   }
   locked TRUE
 }
-# End-wall corner sections start at z=+/-0.39 (just outside goal-post outer
-# edge at z=+/-0.375) so their bounding objects never overlap the goal posts.
-# Gap = 0.015 m < ball radius (0.043 m), so the ball cannot escape.
-DEF ENDW_L_TOP Solid {
-  translation -1.54 0.175 0.695
-  name "endw_l_top"
+# End walls: single continuous board per end, inner face at x = ±1.85.
+# Z-span 2.40 m exactly fills the gap between the two sideline wall inner
+# faces (z = ±1.20), forming a seamless fully-enclosed rectangle.
+DEF ENDW_L Solid {
+  translation -1.89 0.175 0
+  name "endw_l"
   children [
     Shape {
       appearance USE WALL_APP
       geometry Box {
-        size 0.08 0.35 0.61
+        size 0.08 0.35 2.40
       }
     }
   ]
   boundingObject Box {
-    size 0.08 0.35 0.61
+    size 0.08 0.35 2.40
   }
   locked TRUE
 }
-DEF ENDW_L_BOT Solid {
-  translation -1.54 0.175 -0.695
-  name "endw_l_bot"
+DEF ENDW_R Solid {
+  translation 1.89 0.175 0
+  name "endw_r"
   children [
     Shape {
       appearance USE WALL_APP
       geometry Box {
-        size 0.08 0.35 0.61
+        size 0.08 0.35 2.40
       }
     }
   ]
   boundingObject Box {
-    size 0.08 0.35 0.61
-  }
-  locked TRUE
-}
-DEF ENDW_R_TOP Solid {
-  translation 1.54 0.175 0.695
-  name "endw_r_top"
-  children [
-    Shape {
-      appearance USE WALL_APP
-      geometry Box {
-        size 0.08 0.35 0.61
-      }
-    }
-  ]
-  boundingObject Box {
-    size 0.08 0.35 0.61
-  }
-  locked TRUE
-}
-DEF ENDW_R_BOT Solid {
-  translation 1.54 0.175 -0.695
-  name "endw_r_bot"
-  children [
-    Shape {
-      appearance USE WALL_APP
-      geometry Box {
-        size 0.08 0.35 0.61
-      }
-    }
-  ]
-  boundingObject Box {
-    size 0.08 0.35 0.61
+    size 0.08 0.35 2.40
   }
   locked TRUE
 }
@@ -446,6 +436,10 @@ DEF BALL Solid {
   physics Physics {
     density -1
     mass 0.04
+    damping Damping {
+      linear  0.95
+      angular 0.95
+    }
   }
 }
 

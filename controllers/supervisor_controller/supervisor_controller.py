@@ -24,7 +24,7 @@ import math
 from controller import Supervisor
 
 # ── Simulation constants ──────────────────────────────────────────────────────
-TIME_STEP        = 64       # ms – must match WorldInfo.basicTimeStep
+TIME_STEP        = 64       # ms – controller step (must be a multiple of basicTimeStep=16)
 EPISODE_DURATION = 60       # seconds per episode
 
 # Per-robot speed ceilings (must match maxVelocity in soccer.wbt)
@@ -39,6 +39,23 @@ FIELD_X_HALF = 1.5
 FIELD_Z_HALF = 1.0
 GOAL_Z_HALF  = 0.35
 BALL_RADIUS  = 0.043
+
+# ── Ball stillness guard ──────────────────────────────────────────────────────
+# Distances (centre-to-centre) at which each robot is considered to be
+# touching the ball  (robot_body_radius + ball_radius + 15 mm margin).
+TITAN_CONTACT_DIST = 0.090 + 0.043 + 0.015   # 0.148 m
+VIPER_CONTACT_DIST = 0.070 + 0.043 + 0.015   # 0.128 m
+# Ball speed above which it is considered "in play" after a kick.
+BALL_MOVING_SPEED  = 0.05                     # m/s
+
+# Out-of-bounds thresholds – trigger is the field boundary line, not the wall.
+# The ball respawns as soon as it crosses a white line, just like a real match.
+#   Sideline:  |z| > FIELD_Z_HALF  (1.0 m)
+#   End line:  |x| > FIELD_X_HALF  (1.5 m) AND outside the goal mouth
+#   Goal mouth is handled by _compute_reward (not here).
+# A small slack (half a ball diameter) avoids false triggers while the ball
+# is still rolling along the line.
+OOB_SLACK = BALL_RADIUS          # 0.043 m ≈ one ball radius of tolerance
 
 # ── Spawn positions ───────────────────────────────────────────────────────────
 # Robot y = wheel_radius so the wheel Sphere bounding objects rest at y = 0.
@@ -130,6 +147,13 @@ class SoccerSupervisor:
                 self.score_red += 1
             print(f"GOAL! Scorer: {goal_info['scorer']}  "
                   f"Score: Blue {self.score_blue} – {self.score_red} Red")
+            # Respawn ball at centre circle immediately so the scene looks
+            # correct in the frame before the RL agent calls reset().
+            self._respawn_ball()
+        else:
+            # Safety net: teleport ball back to centre if it somehow escapes
+            # the arena walls due to a physics glitch.
+            self._check_ball_bounds()
 
         return obs, reward, done, info
 
@@ -208,22 +232,80 @@ class SoccerSupervisor:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
+    def _respawn_ball(self):
+        """Teleport ball to the centre spot and zero all linear/angular momentum."""
+        self._place(self.ball_trans, BALL_SPAWN)
+        self.ball_node.setVelocity([0, 0, 0, 0, 0, 0])
+
+    def _check_ball_bounds(self):
+        """
+        Respawn the ball whenever it leaves the field, just like a real match.
+
+        Triggers:
+          |z| > FIELD_Z_HALF + OOB_SLACK       → crossed a sideline
+          |x| > FIELD_X_HALF + OOB_SLACK
+            AND |z| > GOAL_Z_HALF + OOB_SLACK  → crossed an end line outside
+                                                  the goal mouth
+
+        Goal-mouth crossings (|x| > 1.5, |z| < GOAL_Z_HALF) are handled
+        separately by _compute_reward and never reach this method.
+        """
+        pos = self.ball_node.getPosition()
+        bx, bz = pos[0], pos[2]
+
+        crossed_sideline = abs(bz) > FIELD_Z_HALF + OOB_SLACK
+        crossed_endline  = (abs(bx) > FIELD_X_HALF + OOB_SLACK
+                            and abs(bz) > GOAL_Z_HALF + OOB_SLACK)
+
+        if crossed_sideline or crossed_endline:
+            print(f"[supervisor] Ball out of bounds at "
+                  f"({bx:.3f}, {bz:.3f}) – respawning at centre.")
+            self._respawn_ball()
+
     def _constrain_ball_to_floor(self):
         """
-        Force the ball to stay in the XZ floor plane after every simulation step.
-        - Resets Y position to BALL_RADIUS if it has drifted off the floor.
-        - Zeroes only the Y linear velocity so the ball never bounces upward
-          while still being allowed to roll freely (angular velocities kept).
+        Keep the ball in the XZ floor plane and enforce stillness when nothing
+        is kicking it.
+
+        Logic every step
+        ────────────────
+        1. Correct Y drift (ball must rest on the floor).
+        2. Always zero the vertical (Y) velocity – no bouncing.
+        3. Compute whether a robot is currently touching the ball
+           (centre-to-centre distance ≤ contact threshold).
+        4. If NO robot is touching AND the ball's horizontal speed is below
+           BALL_MOVING_SPEED → zero ALL remaining velocity components.
+           This makes physics-engine noise, gravity micro-slopes, and
+           constraint-force drift completely harmless.
+        5. If a robot IS touching OR the ball is already rolling fast (was
+           kicked), leave the velocity untouched so physics handles it.
         """
         pos = self.ball_node.getPosition()
         vel = self.ball_node.getVelocity()   # [vx, vy, vz, wx, wy, wz]
+        vx, vy, vz, wx, wy, wz = vel
+        bx, bz = pos[0], pos[2]
 
+        # 1. Fix Y position
         if abs(pos[1] - BALL_RADIUS) > 0.001:
-            self.ball_trans.setSFVec3f([pos[0], BALL_RADIUS, pos[2]])
-        if abs(vel[1]) > 0.001:
-            # Zero only the vertical (Y) linear velocity; preserve rolling spin.
-            self.ball_node.setVelocity([vel[0], 0.0, vel[2],
-                                        vel[3], vel[4], vel[5]])
+            self.ball_trans.setSFVec3f([bx, BALL_RADIUS, bz])
+
+        # 2. Zero vertical velocity
+        vy = 0.0
+
+        # 3. Is a robot touching the ball?
+        bp = self.blue_node.getPosition()
+        rp = self.red_node.getPosition()
+        d_blue = math.sqrt((bx - bp[0]) ** 2 + (bz - bp[2]) ** 2)
+        d_red  = math.sqrt((bx - rp[0]) ** 2 + (bz - rp[2]) ** 2)
+        robot_touching = (d_blue < TITAN_CONTACT_DIST or
+                          d_red  < VIPER_CONTACT_DIST)
+
+        # 4. Freeze ball when idle (no robot contact AND slow)
+        speed = math.sqrt(vx * vx + vz * vz)
+        if not robot_touching and speed < BALL_MOVING_SPEED:
+            vx = vz = wx = wy = wz = 0.0
+
+        self.ball_node.setVelocity([vx, vy, vz, wx, wy, wz])
 
     def _place(self, trans_field, xyz):
         trans_field.setSFVec3f(list(xyz))

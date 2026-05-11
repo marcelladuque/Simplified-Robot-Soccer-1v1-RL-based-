@@ -34,7 +34,7 @@ MAX_SPEED_BY_ROBOT = {
 }
 DEFAULT_MAX_SPEED = 14.0   # fallback for any unknown name
 
-TIME_STEP = 64             # ms – must match WorldInfo.basicTimeStep
+TIME_STEP = 64             # ms – controller step (must be a multiple of basicTimeStep=16)
 
 
 def run():
