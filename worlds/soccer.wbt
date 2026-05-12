@@ -508,7 +508,7 @@ DEF BALL Solid {
     mass 0.04
   }
 }
-DEF ROBOT_BLUE Robot {
+DEF ROBOT_BLUE_0 Robot {
   translation -0.75 0.032 0
   rotation 0 1 0 0
   children [
@@ -856,7 +856,7 @@ DEF ROBOT_BLUE Robot {
   }
   controller "robot_controller"
 }
-DEF ROBOT_RED Robot {
+DEF ROBOT_RED_0 Robot {
   translation 0.75 0.026 0
   rotation 0 1 0 3.14159265
   children [

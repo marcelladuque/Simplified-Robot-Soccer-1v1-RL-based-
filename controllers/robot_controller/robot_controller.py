@@ -2,6 +2,13 @@
 robot_controller.py
 -------------------
 Webots controller para robôs F180 omnidirecionais com 3 rodas.
+---
+    receive motion commands from a supervisor and convert them into wheel motor velocities for robot
+    it can only see and control the hardware of the robot it's running inside: 
+        its motors, 
+        its sensors
+    It has no view of the field, other robots, or the ball
+---
 
 O supervisor envia comandos via Emitter (canal -1) no formato:
     "<prefix> <vx> <vz> <omega>"
@@ -27,6 +34,139 @@ Prefixo derivado do nome Webots:
 import math
 from controller import Robot
 
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))  # go up one level
+from shared_configs import ALL_ROBOTS # TeamConfig, RobotConfig, (TITAN, VIPER,)
+
+
+TIME_STEP = 64  # ms — deve coincidir com WorldInfo.basicTimeStep
+
+
+class MoveRobot:
+    def __init__(self, robot: Robot):
+        self.robot = robot
+
+        # Derive identity from Webots node name: "robot_blue" -> "blue"
+        # change this, each robot should have 
+        full_name  = robot.getName()
+        self.prefix = full_name.split("_", 1)[-1]
+
+        # Look up physical config from shared_configs
+        cfg_lookup = {r.msg_prefix: r for r in ALL_ROBOTS}
+        self.cfg = cfg_lookup.get(self.prefix)
+        if self.cfg is None:
+            raise RuntimeError(
+                f"No RobotConfig found for prefix '{self.prefix}'. "
+                f"Known prefixes: {list(cfg_lookup.keys())}"
+            )
+
+        # --- Motors --- #
+        # named "wheel1 motor", "wheel2 motor", "wheel3 motor" in .wbt
+        self.motors = []
+        for i in range(1, 4):
+            m = robot.getDevice(f"wheel{i} motor")
+            if m is None:
+                raise RuntimeError(
+                    f"Motor 'wheel{i} motor' not found in robot '{full_name}'"
+                )
+            m.setPosition(float("inf"))  # velocity control mode
+            m.setVelocity(0.0)
+            self.motors.append(m)
+
+        # --- Receiver --- # 
+        # listens on broadcast channel -1
+        self.receiver = robot.getDevice("receiver")
+        if self.receiver:
+            self.receiver.enable(TIME_STEP)
+        else:
+            print(f"[{self.prefix}] WARNING: no receiver device found")
+
+
+
+    
+    def inverse_kinematics(self, 
+            vx: float, 
+            vz: float, 
+            omega: float
+        ) -> list[float]:
+        """
+        Converts (vx, vz, omega) to individual wheel angular velocities.
+
+        3-wheel omni layout (equilateral triangle):
+            wheel 1 — front        (90°)
+            wheel 2 — back-left   (210°)
+            wheel 3 — back-right  (330°)
+
+        Formula per wheel i:
+            w_i = ( -sin(θ_i)*vx + cos(θ_i)*vz + L*omega ) / r
+        """
+
+        L = self.cfg.wheel_center_dist
+        r = self.cfg.wheel_radius
+
+        return [
+            (-math.sin(theta) * vx + math.cos(theta) * vz + L * omega) / r
+            for theta in self.cfg.wheel_angles
+        ]
+    
+    def read_command(self):
+        """
+        Drains the receiver queue, returns the most recent (vx, vz, omega)
+        tuple addressed to this robot, or None if no valid command arrived.
+        """
+        if not self.receiver:
+            return None
+
+        result = None
+        while self.receiver.getQueueLength() > 0:
+            raw = self.receiver.getString()
+            self.receiver.nextPacket()
+
+            parts = raw.strip().split()
+            if len(parts) == 4 and parts[0] == self.prefix:
+                try:
+                    result = (float(parts[1]), float(parts[2]), float(parts[3]))
+                except ValueError:
+                    pass  # malformed packet -> ignore, keep previous
+
+        return result
+    
+    def step(self):
+        """
+        Called once per simulation step.
+        Reads the latest command and updates motor velocities if one arrived.
+        If no command arrived this step, previous velocities are kept.
+        """
+        command = self.read_command()
+        if command is None:
+            return
+
+        vx, vz, omega = command
+        wheel_speeds   = self.inverse_kinematics(vx, vz, omega)
+
+        for motor, speed in zip(self.motors, wheel_speeds):
+            clamped = max(-self.cfg.max_speed, min(self.cfg.max_speed, speed))
+            motor.setVelocity(clamped)
+
+
+
+def run():
+    robot = Robot()
+    mover = MoveRobot(robot)
+
+    while robot.step(TIME_STEP) != -1:
+        mover.step()
+
+if __name__ == "__main__":
+    run()
+
+
+
+
+# clean assumig no errors
+
+'''
 # ── Parâmetros físicos por robô ───────────────────────────────────────────────
 # L   = distância do centro geométrico ao ponto de contacto de cada roda (m)
 # r   = raio da roda (m)
@@ -43,8 +183,10 @@ WHEEL_ANGLES = [
     math.radians(210),  # W2 — trás-esquerda
     math.radians(330),  # W3 — trás-direita
 ]
+'''
 
-TIME_STEP = 64  # ms — deve coincidir com WorldInfo.basicTimeStep
+
+'''
 
 
 def omni_inverse_kinematics(vx, vz, omega, L, r):
@@ -129,6 +271,4 @@ def run():
                 motor.setVelocity(clamped)
         # Sem comando neste step → mantém velocidades anteriores
 
-
-if __name__ == "__main__":
-    run()
+'''
